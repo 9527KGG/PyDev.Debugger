@@ -259,7 +259,7 @@ class _PyDevJsonCommandProcessor(object):
             return cwd + (os.path.sep if append_pathsep else '')
         return remote_root
 
-    def _set_debug_options(self, py_db, args):
+    def _set_debug_options(self, py_db, args, start_reason):
         rules = args.get('rules')
         exclude_filters = []
 
@@ -296,14 +296,21 @@ class _PyDevJsonCommandProcessor(object):
 
         self.api.set_show_return_values(py_db, self._debug_options.get('SHOW_RETURN_VALUE', False))
 
+        if self._debug_options.get('STOP_ON_ENTRY', False) and start_reason == 'launch':
+            self.api.stop_on_entry()
+
     def _send_process_event(self, py_db, start_method):
+        if len(sys.argv) > 0:
+            name = sys.argv[0]
+        else:
+            name = ''
         body = ProcessEventBody(
-            name=sys.argv[0],
+            name=name,
             systemProcessId=os.getpid(),
             isLocalProcess=True,
             startMethod=start_method,
         )
-        event = ProcessEvent(body, 0)
+        event = ProcessEvent(body)
         py_db.writer.add_command(NetCommand(CMD_PROCESS_EVENT, 0, event, is_json=True))
 
     def on_launch_request(self, py_db, request):
@@ -313,7 +320,7 @@ class _PyDevJsonCommandProcessor(object):
         self._send_process_event(py_db, 'launch')
         self._launch_or_attach_request_done = True
         self.api.set_enable_thread_notifications(py_db, True)
-        self._set_debug_options(py_db, request.arguments.kwargs)
+        self._set_debug_options(py_db, request.arguments.kwargs, start_reason='launch')
         response = pydevd_base_schema.build_response(request)
         return NetCommand(CMD_RETURN, 0, response, is_json=True)
 
@@ -324,7 +331,7 @@ class _PyDevJsonCommandProcessor(object):
         self._send_process_event(py_db, 'attach')
         self._launch_or_attach_request_done = True
         self.api.set_enable_thread_notifications(py_db, True)
-        self._set_debug_options(py_db, request.arguments.kwargs)
+        self._set_debug_options(py_db, request.arguments.kwargs, start_reason='attach')
         response = pydevd_base_schema.build_response(request)
         return NetCommand(CMD_RETURN, 0, response, is_json=True)
 
