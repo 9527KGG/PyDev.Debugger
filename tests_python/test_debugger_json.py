@@ -194,7 +194,7 @@ class JsonFacade(object):
         self.wait_for_response(self.write_request(request))
 
     def write_disconnect(self, wait_for_response=True):
-        self._sent_launch_or_attach = True
+        self._sent_launch_or_attach = False
         arguments = pydevd_schema.DisconnectArguments(terminateDebuggee=False)
         request = pydevd_schema.DisconnectRequest(arguments)
         self.write_request(request)

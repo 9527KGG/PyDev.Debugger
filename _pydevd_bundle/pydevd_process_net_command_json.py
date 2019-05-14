@@ -313,27 +313,25 @@ class _PyDevJsonCommandProcessor(object):
         event = ProcessEvent(body)
         py_db.writer.add_command(NetCommand(CMD_PROCESS_EVENT, 0, event, is_json=True))
 
+    def _handle_launch_or_attach_request(self, py_db, request, start_reason):
+        self._send_process_event(py_db, start_reason)
+        self._launch_or_attach_request_done = True
+        self.api.set_enable_thread_notifications(py_db, True)
+        self._set_debug_options(py_db, request.arguments.kwargs, start_reason=start_reason)
+        response = pydevd_base_schema.build_response(request)
+        return NetCommand(CMD_RETURN, 0, response, is_json=True)
+
     def on_launch_request(self, py_db, request):
         '''
         :param LaunchRequest request:
         '''
-        self._send_process_event(py_db, 'launch')
-        self._launch_or_attach_request_done = True
-        self.api.set_enable_thread_notifications(py_db, True)
-        self._set_debug_options(py_db, request.arguments.kwargs, start_reason='launch')
-        response = pydevd_base_schema.build_response(request)
-        return NetCommand(CMD_RETURN, 0, response, is_json=True)
+        return self._handle_launch_or_attach_request(py_db, request, start_reason='launch')
 
     def on_attach_request(self, py_db, request):
         '''
         :param AttachRequest request:
         '''
-        self._send_process_event(py_db, 'attach')
-        self._launch_or_attach_request_done = True
-        self.api.set_enable_thread_notifications(py_db, True)
-        self._set_debug_options(py_db, request.arguments.kwargs, start_reason='attach')
-        response = pydevd_base_schema.build_response(request)
-        return NetCommand(CMD_RETURN, 0, response, is_json=True)
+        return self._handle_launch_or_attach_request(py_db, request, start_reason='attach')
 
     def on_pause_request(self, py_db, request):
         '''
