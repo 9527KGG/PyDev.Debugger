@@ -9,12 +9,14 @@ import types
 from _pydevd_bundle._debug_adapter import pydevd_base_schema
 from _pydevd_bundle._debug_adapter.pydevd_schema import (SourceBreakpoint, ScopesResponseBody, Scope,
     VariablesResponseBody, SetVariableResponseBody, ModulesResponseBody, SourceResponseBody,
-    GotoTargetsResponseBody, ExceptionOptions, SetExpressionResponseBody, EvaluateResponseBody)
+    GotoTargetsResponseBody, ExceptionOptions, SetExpressionResponseBody, EvaluateResponseBody,
+    ProcessEventBody, ProcessEvent)
 from _pydevd_bundle._debug_adapter.pydevd_schema import CompletionsResponseBody
 from _pydevd_bundle.pydevd_api import PyDevdAPI
 from _pydevd_bundle.pydevd_comm_constants import (
     CMD_RETURN, CMD_STEP_OVER_MY_CODE, CMD_STEP_OVER, CMD_STEP_INTO_MY_CODE,
-    CMD_STEP_INTO, CMD_STEP_RETURN_MY_CODE, CMD_STEP_RETURN, CMD_SET_NEXT_STATEMENT)
+    CMD_STEP_INTO, CMD_STEP_RETURN_MY_CODE, CMD_STEP_RETURN, CMD_SET_NEXT_STATEMENT,
+    CMD_PROCESS_EVENT)
 from _pydevd_bundle.pydevd_filtering import ExcludeFilter
 from _pydevd_bundle.pydevd_json_debug_options import _extract_debug_options
 from _pydevd_bundle.pydevd_net_command import NetCommand
@@ -22,6 +24,7 @@ from _pydevd_bundle.pydevd_utils import convert_dap_log_message_to_expression
 import pydevd_file_utils
 from _pydev_bundle import pydev_log
 from _pydevd_bundle.pydevd_constants import DebugInfoHolder
+import sys
 
 try:
     import dis
@@ -145,6 +148,7 @@ class _PyDevJsonCommandProcessor(object):
         self._debug_options = {}
         self._next_breakpoint_id = partial(next, itertools.count(0))
         self._goto_targets_map = IDMap()
+        self._launch_or_attach_request_done = False
 
     def process_net_command_json(self, py_db, json_contents):
         '''
@@ -200,6 +204,9 @@ class _PyDevJsonCommandProcessor(object):
         '''
         :param ConfigurationDoneRequest request:
         '''
+        if not self._launch_or_attach_request_done:
+            pydev_log.critical('Missing launch request or attach request before configuration done request.')
+
         self.api.run(py_db)
         self.api.notify_configuration_done(py_db)
 
@@ -289,10 +296,22 @@ class _PyDevJsonCommandProcessor(object):
 
         self.api.set_show_return_values(py_db, self._debug_options.get('SHOW_RETURN_VALUE', False))
 
+    def _send_process_event(self, py_db, start_method):
+        body = ProcessEventBody(
+            name=sys.argv[0],
+            systemProcessId=os.getpid(),
+            isLocalProcess=True,
+            startMethod=start_method,
+        )
+        event = ProcessEvent(body, 0)
+        py_db.writer.add_command(NetCommand(CMD_PROCESS_EVENT, 0, event, is_json=True))
+
     def on_launch_request(self, py_db, request):
         '''
         :param LaunchRequest request:
         '''
+        self._send_process_event(py_db, 'launch')
+        self._launch_or_attach_request_done = True
         self.api.set_enable_thread_notifications(py_db, True)
         self._set_debug_options(py_db, request.arguments.kwargs)
         response = pydevd_base_schema.build_response(request)
@@ -302,6 +321,8 @@ class _PyDevJsonCommandProcessor(object):
         '''
         :param AttachRequest request:
         '''
+        self._send_process_event(py_db, 'attach')
+        self._launch_or_attach_request_done = True
         self.api.set_enable_thread_notifications(py_db, True)
         self._set_debug_options(py_db, request.arguments.kwargs)
         response = pydevd_base_schema.build_response(request)
@@ -423,6 +444,7 @@ class _PyDevJsonCommandProcessor(object):
         '''
         :param DisconnectRequest request:
         '''
+        self._launch_or_attach_request_done = False
         self.api.request_disconnect(py_db, resume_threads=True)
 
         response = pydevd_base_schema.build_response(request)
