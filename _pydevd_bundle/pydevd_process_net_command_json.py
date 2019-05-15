@@ -149,6 +149,7 @@ class _PyDevJsonCommandProcessor(object):
         self._next_breakpoint_id = partial(next, itertools.count(0))
         self._goto_targets_map = IDMap()
         self._launch_or_attach_request_done = False
+        self._start_reason = 'launch'
 
     def process_net_command_json(self, py_db, json_contents):
         '''
@@ -207,11 +208,26 @@ class _PyDevJsonCommandProcessor(object):
         if not self._launch_or_attach_request_done:
             pydev_log.critical('Missing launch request or attach request before configuration done request.')
 
+        self._send_process_event(py_db, self._start_reason)
         self.api.run(py_db)
         self.api.notify_configuration_done(py_db)
 
         configuration_done_response = pydevd_base_schema.build_response(request)
         return NetCommand(CMD_RETURN, 0, configuration_done_response, is_json=True)
+
+    def _send_process_event(self, py_db, start_method):
+        if len(sys.argv) > 0:
+            name = sys.argv[0]
+        else:
+            name = ''
+        body = ProcessEventBody(
+            name=name,
+            systemProcessId=os.getpid(),
+            isLocalProcess=True,
+            startMethod=start_method,
+        )
+        event = ProcessEvent(body)
+        py_db.writer.add_command(NetCommand(CMD_PROCESS_EVENT, 0, event, is_json=True))
 
     def on_threads_request(self, py_db, request):
         '''
@@ -299,22 +315,8 @@ class _PyDevJsonCommandProcessor(object):
         if self._debug_options.get('STOP_ON_ENTRY', False) and start_reason == 'launch':
             self.api.stop_on_entry()
 
-    def _send_process_event(self, py_db, start_method):
-        if len(sys.argv) > 0:
-            name = sys.argv[0]
-        else:
-            name = ''
-        body = ProcessEventBody(
-            name=name,
-            systemProcessId=os.getpid(),
-            isLocalProcess=True,
-            startMethod=start_method,
-        )
-        event = ProcessEvent(body)
-        py_db.writer.add_command(NetCommand(CMD_PROCESS_EVENT, 0, event, is_json=True))
-
     def _handle_launch_or_attach_request(self, py_db, request, start_reason):
-        self._send_process_event(py_db, start_reason)
+        self._start_reason = start_reason
         self._launch_or_attach_request_done = True
         self.api.set_enable_thread_notifications(py_db, True)
         self._set_debug_options(py_db, request.arguments.kwargs, start_reason=start_reason)
