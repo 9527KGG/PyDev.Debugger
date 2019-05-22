@@ -9,7 +9,7 @@ from functools import partial
 
 import pydevd_file_utils
 from _pydev_bundle import pydev_log
-from _pydevd_bundle._debug_adapter import pydevd_base_schema
+from _pydevd_bundle._debug_adapter import pydevd_base_schema, pydevd_schema
 from _pydevd_bundle._debug_adapter.pydevd_schema import (
     CompletionsResponseBody, EvaluateResponseBody, ExceptionOptions,
     GotoTargetsResponseBody, ModulesResponseBody, ProcessEventBody,
@@ -115,8 +115,8 @@ def _convert_rules_to_exclude_filters(rules, filename_to_server, on_error):
         # i.e.: if we have:
         # /sub1/sub2/sub3
         # a rule with /sub1/sub2 would match before a rule only with /sub1.
-        directory_exclude_filters = sorted(directory_exclude_filters, key=lambda exclude_filter: -len(exclude_filter.name))
-        module_exclude_filters = sorted(module_exclude_filters, key=lambda exclude_filter: -len(exclude_filter.name))
+        directory_exclude_filters = sorted(directory_exclude_filters, key=lambda exclude_filter:-len(exclude_filter.name))
+        module_exclude_filters = sorted(module_exclude_filters, key=lambda exclude_filter:-len(exclude_filter.name))
         exclude_filters = directory_exclude_filters + glob_exclude_filters + module_exclude_filters
 
     return exclude_filters
@@ -510,13 +510,30 @@ class _PyDevJsonCommandProcessor(object):
                 is_logpoint = True
                 expression = convert_dap_log_message_to_expression(log_message)
 
-            self.api.add_breakpoint(
+            error_code = self.api.add_breakpoint(
                 py_db, filename, btype, breakpoint_id, line, condition, func_name, expression, suspend_policy, hit_condition, is_logpoint)
 
-            # Note that the id is made up (the id for pydevd is unique only within a file, so, the
-            # line is used for it).
-            # Also, the id is currently not used afterwards, so, we don't even keep a mapping.
-            breakpoints_set.append({'id': self._next_breakpoint_id(), 'verified': True, 'line': line})
+            if error_code:
+                if error_code == self.api.ADD_BREAKPOINT_FILE_NOT_FOUND:
+                    error_msg = 'Breakpoint in file that does not exist.'
+
+                elif error_code == self.api.ADD_BREAKPOINT_FILE_EXCLUDED_BY_FILTERS:
+                    error_msg = 'Breakpoint in file excluded by filters.'
+                    if py_db.get_use_libraries_filter():
+                        error_msg += '\nNote: may be excluded because of "justMyCode" option (default == true).'
+
+                else:
+                    # Shouldn't get here.
+                    error_msg = 'Breakpoint not validated (reason unknown -- please report as bug).'
+
+                breakpoints_set.append(pydevd_schema.Breakpoint(
+                    verified=False, line=line, message=error_msg).to_dict())
+            else:
+                # Note that the id is made up (the id for pydevd is unique only within a file, so, the
+                # line is used for it).
+                # Also, the id is currently not used afterwards, so, we don't even keep a mapping.
+                breakpoints_set.append(pydevd_schema.Breakpoint(
+                    verified=True, id=self._next_breakpoint_id(), line=line).to_dict())
 
         body = {'breakpoints': breakpoints_set}
         set_breakpoints_response = pydevd_base_schema.build_response(request, kwargs={'body': body})
