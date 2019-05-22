@@ -124,6 +124,9 @@ class JsonFacade(object):
         '''
         Adds a breakpoint.
         '''
+        if not self._sent_launch_or_attach:
+            self.write_launch()
+
         if isinstance(lines, int):
             lines = [lines]
 
@@ -182,18 +185,21 @@ class JsonFacade(object):
         assert response.success
 
     def write_launch(self, **arguments):
+        assert not self._sent_launch_or_attach
         self._sent_launch_or_attach = True
         arguments['noDebug'] = False
         request = {'type': 'request', 'command': 'launch', 'arguments': arguments, 'seq':-1}
         self.wait_for_response(self.write_request(request))
 
     def write_attach(self, **arguments):
+        assert not self._sent_launch_or_attach
         self._sent_launch_or_attach = True
         arguments['noDebug'] = False
         request = {'type': 'request', 'command': 'attach', 'arguments': arguments, 'seq':-1}
         self.wait_for_response(self.write_request(request))
 
     def write_disconnect(self, wait_for_response=True):
+        assert self._sent_launch_or_attach
         self._sent_launch_or_attach = False
         arguments = pydevd_schema.DisconnectArguments(terminateDebuggee=False)
         request = pydevd_schema.DisconnectRequest(arguments)
@@ -788,8 +794,8 @@ def test_return_value(case_setup):
         json_facade = JsonFacade(writer)
 
         break_line = writer.get_line_index_with_content('break here')
-        json_facade.write_set_breakpoints(break_line)
         json_facade.write_launch(debugOptions=['ShowReturnValue'])
+        json_facade.write_set_breakpoints(break_line)
         json_facade.write_make_initial_run()
 
         json_hit = json_facade.wait_for_thread_stopped()
@@ -1432,11 +1438,11 @@ def test_stepping(case_setup):
     with case_setup.test_file('_debugger_case_stepping.py') as writer:
         json_facade = JsonFacade(writer)
 
+        json_facade.write_launch(debugOptions=['DebugStdLib'])
         json_facade.write_set_breakpoints([
             writer.get_line_index_with_content('Break here 1'),
             writer.get_line_index_with_content('Break here 2')
         ])
-        json_facade.write_launch(debugOptions=['DebugStdLib'])
         json_facade.write_make_initial_run()
 
         json_hit = json_facade.wait_for_thread_stopped()
@@ -1941,8 +1947,8 @@ def test_source_reference_no_file(case_setup, tmpdir):
     with case_setup.test_file('_debugger_case_source_reference.py', get_environ=get_environ) as writer:
         json_facade = JsonFacade(writer)
 
-        writer.write_add_breakpoint(writer.get_line_index_with_content('breakpoint'))
         json_facade.write_launch(debugOptions=['DebugStdLib'])
+        writer.write_add_breakpoint(writer.get_line_index_with_content('breakpoint'))
         json_facade.write_make_initial_run()
 
         # First hit is for breakpoint reached via a stack frame that doesn't have source.
