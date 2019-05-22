@@ -203,19 +203,18 @@ class JsonFacade(object):
         response = self.wait_for_response(self.write_request(request))
         assert response.success
 
-    def write_launch(self, **arguments):
+    def _write_launch_or_attach(self, command, **arguments):
         assert not self._sent_launch_or_attach
         self._sent_launch_or_attach = True
         arguments['noDebug'] = False
-        request = {'type': 'request', 'command': 'launch', 'arguments': arguments, 'seq':-1}
+        request = {'type': 'request', 'command': command, 'arguments': arguments, 'seq':-1}
         self.wait_for_response(self.write_request(request))
 
+    def write_launch(self, **arguments):
+        return self._write_launch_or_attach('launch', **arguments)
+
     def write_attach(self, **arguments):
-        assert not self._sent_launch_or_attach
-        self._sent_launch_or_attach = True
-        arguments['noDebug'] = False
-        request = {'type': 'request', 'command': 'attach', 'arguments': arguments, 'seq':-1}
-        self.wait_for_response(self.write_request(request))
+        return self._write_launch_or_attach('attach', **arguments)
 
     def write_disconnect(self, wait_for_response=True):
         assert self._sent_launch_or_attach
@@ -1679,6 +1678,8 @@ def test_breakpoint_adjustment(case_setup):
     with case_setup.test_file('_debugger_case_adjust_breakpoint.py') as writer:
         json_facade = JsonFacade(writer)
 
+        json_facade.write_launch()
+
         bp_requested = writer.get_line_index_with_content('requested')
         bp_expected = writer.get_line_index_with_content('expected')
 
@@ -1688,6 +1689,7 @@ def test_breakpoint_adjustment(case_setup):
                 breakpoints=[pydevd_schema.SourceBreakpoint(bp_requested).to_dict()]))
         )
         set_bp_response = json_facade.wait_for_response(set_bp_request)
+        assert set_bp_response.success
         assert set_bp_response.body.breakpoints[0]['line'] == bp_expected
 
         json_facade.write_make_initial_run()
@@ -1852,7 +1854,6 @@ def test_wait_for_attach(case_setup_remote_attach_to):
         process_events = json_facade.mark_messages(ProcessEvent)
         assert len(process_events) == 1
         assert next(iter(process_events)).body.startMethod == start_method
-        json_facade.write_make_initial_run()
 
     with case_setup_remote_attach_to.test_file('_debugger_case_wait_for_attach.py', host_port[1]) as writer:
         time.sleep(.5)  # Give some time for it to pass the first breakpoint and wait in 'wait_for_attach'.
@@ -1868,8 +1869,9 @@ def test_wait_for_attach(case_setup_remote_attach_to):
         pause1_line = writer.get_line_index_with_content('Pause 1')
         pause2_line = writer.get_line_index_with_content('Pause 2')
 
-        json_facade.write_set_breakpoints([break1_line, break2_line, break3_line])
         check_process_event(json_facade, start_method='launch')
+        json_facade.write_set_breakpoints([break1_line, break2_line, break3_line])
+        json_facade.write_make_initial_run()
         json_facade.wait_for_thread_stopped(line=break2_line)
 
         # Upon disconnect, all threads should be running again.
@@ -1879,8 +1881,9 @@ def test_wait_for_attach(case_setup_remote_attach_to):
         writer.start_socket_client(*host_port)
         json_facade = JsonFacade(writer)
         check_thread_events(json_facade)
-        json_facade.write_set_breakpoints([break1_line, break2_line, break3_line])
         check_process_event(json_facade, start_method='attach')
+        json_facade.write_set_breakpoints([break1_line, break2_line, break3_line])
+        json_facade.write_make_initial_run()
         json_facade.wait_for_thread_stopped(line=break3_line)
 
         # Upon disconnect, all threads should be running again.
@@ -1891,12 +1894,14 @@ def test_wait_for_attach(case_setup_remote_attach_to):
         json_facade = JsonFacade(writer)
         check_thread_events(json_facade)
         check_process_event(json_facade, start_method='attach')
+        json_facade.write_make_initial_run()
 
         # Connect back without a disconnect (auto-disconnects previous and connects new client).
         writer.start_socket_client(*host_port)
         json_facade = JsonFacade(writer)
         check_thread_events(json_facade)
         check_process_event(json_facade, start_method='attach')
+        json_facade.write_make_initial_run()
 
         json_facade.write_pause()
         json_hit = json_facade.wait_for_thread_stopped(reason='pause', line=[pause1_line, pause2_line])
